@@ -10,8 +10,15 @@ def check_alerts(ticker: str, threshold_price: float, user_email: str):
 
     try:
 
+        print(f"Checking alerts for {ticker}")
+
         model, scaler, features = load_artifacts(ticker)
 
+        if model is None or scaler is None or features is None:
+            print(f"No trained model found for {ticker}")
+            return
+
+        # Fetch and process data
         df = fetch_stock_data(ticker)
         df = clean_data(df)
         df = add_features(df)
@@ -21,6 +28,8 @@ def check_alerts(ticker: str, threshold_price: float, user_email: str):
             return
 
         latest_price = df["Close"].iloc[-1]
+
+        print(f"{ticker} price: {latest_price}")
 
         # PRICE ALERT
         if latest_price >= threshold_price:
@@ -39,18 +48,29 @@ Threshold: {threshold_price}
                 to_email=user_email
             )
 
-        # MODEL ALERT
+            print("Price alert sent")
+
+        # MODEL FEATURES
         X = df[features]
 
         X = X.replace([np.inf, -np.inf], np.nan)
         X = X.dropna()
 
-        df = df.loc[X.index]
+        if X.empty:
+            print("No valid feature data")
+            return
 
+        # Scale features
         X_scaled = scaler.transform(X)
 
-        prediction = model.predict(X_scaled)[-1]
+        # Use latest row only
+        latest_features = X_scaled[-1].reshape(1, -1)
 
+        prediction = model.predict(latest_features)[0]
+
+        print(f"{ticker} model prediction: {prediction}")
+
+        # BUY SIGNAL
         if prediction == 1:
 
             message = f"""
@@ -65,6 +85,29 @@ Current Price: {latest_price}
                 message=message,
                 to_email=user_email
             )
+
+            print("BUY alert sent")
+
+        # SELL SIGNAL
+        elif prediction == -1:
+
+            message = f"""
+SELL SIGNAL
+
+Ticker: {ticker}
+Current Price: {latest_price}
+"""
+
+            send_email_alert(
+                subject=f"{ticker} SELL SIGNAL",
+                message=message,
+                to_email=user_email
+            )
+
+            print("SELL alert sent")
+
+        else:
+            print("No trading signal")
 
     except Exception as e:
         print(f"Alert engine error: {e}")
